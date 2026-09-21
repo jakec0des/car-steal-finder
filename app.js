@@ -1,5 +1,6 @@
 const $=s=>document.querySelector(s);
 const state={items:JSON.parse(localStorage.getItem("carStealItems")||"[]"),view:"all",editingId:null};
+const ANALYZER_URL=(window.WHEELBEAST_ANALYZER_URL||"").replace(/\/$/,"");
 const fmt=n=>n==null?"Price ?":new Intl.NumberFormat("en-CA",{style:"currency",currency:"CAD",maximumFractionDigits:0}).format(n);
 const esc=s=>String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
 function source(url=""){try{const h=new URL(url).hostname;if(h.includes("facebook"))return"Facebook Marketplace";if(h.includes("kijiji"))return"Kijiji";if(h.includes("autotrader"))return"AutoTrader";return h}catch{return"Manual"}}
@@ -20,6 +21,38 @@ function filters(){return{maxPrice:Number($("#maxPrice").value),maxKm:Number($("
 function isPriority(x){return/toyota|honda|pontiac\s+vibe|scion/i.test((x.title||"")+" "+(x.text||""))}
 function needsDetails(x){return x.price==null||x.km==null||x.year==null||x.title==="Vehicle listing"}
 function facebookAppUrl(url){return"fb://facewebmodal/f?href="+encodeURIComponent(url)}
+function applyMetadata(m={}){
+ const vehicle=[m.year,m.make,m.model,m.trim].filter(Boolean).join(" ").trim();
+ if(vehicle) $("#vehicle").value=vehicle;
+ if(m.price!=null) $("#priceInput").value=m.price;
+ if(m.km!=null) $("#kmInput").value=m.km;
+ if(m.year!=null) $("#yearInput").value=m.year;
+ $("#safetyInput").checked=m.safety_status==="certified";
+ const notes=[
+   m.description_summary,
+   ...(Array.isArray(m.maintenance_signals)?m.maintenance_signals.map(x=>"Maintenance: "+x):[]),
+   ...(Array.isArray(m.warning_flags)?m.warning_flags.map(x=>"Warning: "+x):[]),
+   m.seller_notes
+ ].filter(Boolean).join("\n");
+ if(notes) $("#text").value=notes;
+}
+async function analyzeUrl(url){
+ if(!ANALYZER_URL||!url||source(url)!=="Facebook Marketplace") return false;
+ const note=$("#missingNote");
+ note.classList.remove("hidden"); note.textContent="🤖 WheelBeast is reading this Marketplace listing…";
+ try{
+   const r=await fetch(ANALYZER_URL+"/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url})});
+   const data=await r.json().catch(()=>({}));
+   if(!r.ok) throw new Error(data.code==="FB_LOGIN_REQUIRED"?"WheelBeast Facebook session needs refreshing.":data.error||"Analyzer unavailable.");
+   applyMetadata(data.metadata||{});
+   const c=data.metadata?.confidence;
+   note.textContent="✓ Listing read automatically"+(typeof c==="number"?" • "+Math.round(c*100)+"% confidence":"")+". Review the fields, then Score & Save.";
+   return true;
+ }catch(e){
+   note.textContent="Automatic read unavailable: "+e.message+" You can still enter the details manually.";
+   return false;
+ }
+}
 function render(){
  const f=filters();
  let xs=state.items.filter(x=>(x.price==null||x.price<=f.maxPrice)&&(x.km==null||x.km<=f.maxKm)&&(!f.safety||x.safetyConfirmed));
@@ -43,14 +76,15 @@ function render(){
  }).join("");
  document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editListing(b.dataset.edit));
 }
-function openAdd(u="",t=""){
+function openAdd(u="",t="",autoAnalyze=false){
  state.editingId=null;
  $("#modalTitle").textContent="Add a listing";
  $("#url").value=u;$("#vehicle").value="";$("#priceInput").value="";$("#kmInput").value="";$("#yearInput").value="";$("#safetyInput").checked=false;$("#text").value=t;
  $("#missingNote").classList.toggle("hidden",!!t);
  $("#missingNote").textContent=t?"":"Shared links often contain only the URL. Add the vehicle, price and km for an accurate score.";
  $("#modal").classList.remove("hidden");
- setTimeout(()=>$("#vehicle").focus(),100);
+ if(autoAnalyze&&u) analyzeUrl(u);
+ else setTimeout(()=>$("#vehicle").focus(),100);
 }
 function editListing(id){
  const x=state.items.find(i=>i.id===id);if(!x)return;state.editingId=id;
@@ -62,12 +96,12 @@ function editListing(id){
 $("#addBtn").onclick=()=>openAdd();
 $("#closeBtn").onclick=()=>{$("#modal").classList.add("hidden");state.editingId=null};
 $("#saveBtn").onclick=()=>{const u=$("#url").value.trim(),t=buildText();if(!u&&!t)return;saveListing(u,t||u);$("#modal").classList.add("hidden")};
-$("#pasteBtn").onclick=async()=>{try{const t=await navigator.clipboard.readText();const url=(t.match(/https?:\/\/\S+/)||[])[0]||"";openAdd(url,t)}catch{openAdd()}};
+$("#pasteBtn").onclick=async()=>{try{const t=await navigator.clipboard.readText();const url=(t.match(/https?:\/\/\S+/)||[])[0]||"";openAdd(url,t,!!url)}catch{openAdd()}};
 $("#helpBtn").onclick=()=>$("#help").classList.remove("hidden");
 $("#helpClose").onclick=$("#helpDone").onclick=()=>$("#help").classList.add("hidden");
 ["maxPrice","maxKm","safetyOnly","sort"].forEach(id=>$("#"+id).addEventListener("change",render));
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.view=b.dataset.view;render()});
 const q=new URLSearchParams(location.search);
-if(q.get("share")){const shared=q.get("share");const url=(shared.match(/https?:\/\/\S+/)||[])[0]||shared;openAdd(url,shared===url?"":shared);history.replaceState({},"",location.pathname)}
+if(q.get("share")){const shared=q.get("share");const url=(shared.match(/https?:\/\/\S+/)||[])[0]||shared;openAdd(url,shared===url?"":shared,true);history.replaceState({},"",location.pathname)}
 if("serviceWorker"in navigator)navigator.serviceWorker.register("./sw.js");
 render();
