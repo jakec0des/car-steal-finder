@@ -36,7 +36,8 @@ function ensurePendingListing(url){
    price:null,km:null,year:null,score:45,tier:"WATCH",
    safetyConfirmed:false,reliability:"Unknown",
    reasons:["Analyzing listing"],
-   analysisStatus:"pending"
+   analysisStatus:"pending",
+   draft:true
  };
  if(idx>=0) state.items[idx]={...state.items[idx],analysisStatus:"pending",lastSeen:new Date().toISOString()};
  else state.items.unshift(pending);
@@ -51,7 +52,7 @@ function buildText(){
 function saveListing(url,text){
  const scored=CarScore.score({id:state.editingId||url||crypto.randomUUID(),url,source:source(url),title:$("#vehicle").value.trim()||text.split("\n").find(x=>x.trim())||"Vehicle listing",text,capturedAt:new Date().toISOString()});
  const idx=state.items.findIndex(x=>x.id===state.editingId||(url&&x.url===url));
- if(idx>=0)state.items[idx]={...state.items[idx],...scored,lastSeen:new Date().toISOString()};
+ if(idx>=0)state.items[idx]={...state.items[idx],...scored,lastSeen:new Date().toISOString(),draft:false,analysisStatus:"complete"};
  else state.items.unshift({...scored,firstSeen:new Date().toISOString(),lastSeen:new Date().toISOString()});
  state.editingId=null;persist();render();return scored;
 }
@@ -119,6 +120,61 @@ async function analyzeUrl(url){
    clearTimeout(timer);
  }
 }
+async function reviewSharedUrl(url){
+ if(!ANALYZER_URL||!url||source(url)!=="Facebook Marketplace"){
+   openAdd(url,"",false);
+   return;
+ }
+ ensurePendingListing(url);
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),40000);
+ try{
+   const r=await fetch(ANALYZER_URL+"/analyze",{
+     method:"POST",
+     headers:{"content-type":"application/json"},
+     body:JSON.stringify({url}),
+     signal:controller.signal
+   });
+   const data=await r.json().catch(()=>({}));
+   if(!r.ok) throw new Error(data.error||("Analyzer unavailable ("+r.status+")"));
+
+   const m=data.metadata||{};
+   const idx=state.items.findIndex(x=>x.url===url);
+   if(idx>=0){
+     const vehicle=[m.year,m.make,m.model,m.trim].filter(Boolean).join(" ").trim();
+     state.items[idx]={
+       ...state.items[idx],
+       title:vehicle||state.items[idx].title,
+       price:m.price??null,
+       km:m.km??null,
+       year:m.year??null,
+       analysisStatus:"review-ready",
+       reasons:["AI review ready — verify before adding"]
+     };
+     persist();render();
+   }
+
+   openAdd(url,"",false);
+   $("#modalTitle").textContent="Verify AI review";
+   applyMetadata(m);
+   $("#missingNote").classList.remove("hidden");
+   const found=[m.price!=null&&"price",m.km!=null&&"km",m.year!=null&&"year",m.make&&"vehicle",m.description_summary&&"description"].filter(Boolean);
+   $("#missingNote").textContent=found.length
+     ?"✓ AI review complete • found "+found.join(", ")+". Verify the populated details, then tap Add to WheelBeast."
+     :"⚠ AI opened the listing but could not extract vehicle details. Verify or fill in the missing fields.";
+   $("#saveBtn").disabled=false;
+   $("#saveBtn").textContent="Add to WheelBeast";
+ }catch(e){
+   const idx=state.items.findIndex(x=>x.url===url);
+   if(idx>=0){
+     state.items[idx].analysisStatus="failed";
+     state.items[idx].analysisError=e.name==="AbortError"?"AI review timed out":(e.message||"AI review failed");
+     persist();render();
+   }
+ }finally{
+   clearTimeout(timer);
+ }
+}
 function render(){
  const f=filters();
  let xs=state.items.filter(x=>(x.price==null||x.price<=f.maxPrice)&&(x.km==null||x.km<=f.maxKm)&&(!f.safety||x.safetyConfirmed));
@@ -131,11 +187,11 @@ function render(){
  if(sort==="km")xs.sort((a,b)=>(a.km||Infinity)-(b.km||Infinity));
  $("#steals").textContent=state.items.filter(x=>x.score>=85).length;
  $("#matches").textContent=xs.length;
- $("#saved").textContent=state.items.length;
+ $("#saved").textContent=state.items.filter(x=>!x.draft).length;
  if(!xs.length){$("#feed").innerHTML='<div class="empty"><b>No matching cars yet.</b><br><br>Shared cars with missing details will stay visible so you can complete them.</div>';return}
  $("#feed").innerHTML=xs.map(x=>{
    const incomplete=needsDetails(x);
-   const analysisBanner=x.analysisStatus==="pending"?'<div class="incomplete">🤖 Reviewing Marketplace listing…</div>':x.analysisStatus==="failed"?'<div class="incomplete">⚠ Review failed — open Edit details to retry manually.</div>':"";
+   const analysisBanner=x.analysisStatus==="pending"?'<div class="incomplete">🤖 AI reviewing Facebook Marketplace post…</div>':x.analysisStatus==="review-ready"?'<div class="incomplete">✓ AI review ready — verify details before adding.</div>':x.analysisStatus==="failed"?'<div class="incomplete">⚠ AI review failed — try sharing again or edit manually.</div>':"";
    let openButton="";
    if(x.url&&x.source==="Facebook Marketplace")openButton='<a href="'+esc(facebookAppUrl(x.url))+'" class="openFb" rel="noopener noreferrer" data-user-open="facebook">Open in Facebook</a>';
    else if(x.url)openButton='<a href="'+esc(x.url)+'" target="_blank" rel="noopener">Open listing</a>';
@@ -196,7 +252,7 @@ if(q.has("share")||hashMatch){
  history.replaceState({},"",location.pathname);
 
  if(url){
-   openAdd(url,shared===url?"":shared,true);
+   reviewSharedUrl(url);
  } else {
    openAdd("","",false);
    $("#missingNote").classList.remove("hidden");
