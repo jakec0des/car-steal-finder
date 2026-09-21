@@ -70,8 +70,11 @@ function applyMetadata(m={}){
 async function analyzeUrl(url){
  if(!ANALYZER_URL||!url||source(url)!=="Facebook Marketplace") return false;
  const note=$("#missingNote");
+ const save=$("#saveBtn");
  note.classList.remove("hidden");
- note.textContent="🤖 WheelBeast is opening the Marketplace listing…";
+ note.textContent="🤖 AI reviewing Facebook Marketplace post…";
+ save.disabled=true;
+ save.textContent="Reviewing…";
  const controller=new AbortController();
  const timer=setTimeout(()=>controller.abort(),40000);
  try{
@@ -90,26 +93,20 @@ async function analyzeUrl(url){
    applyMetadata(data.metadata||{});
    const c=data.metadata?.confidence;
    const m=data.metadata||{};
-   const hasUseful=!!(m.price!=null||m.km!=null||m.year!=null||m.make||m.model||m.description_summary);
-   if(hasUseful){
-     const built=buildText();
-     if(built||url){
-       saveListing(url,built||url);
-       const i=state.items.findIndex(x=>x.url===url);
-       if(i>=0){state.items[i].analysisStatus="complete";persist();render();}
-     }
-   } else {
-     const i=state.items.findIndex(x=>x.url===url);
-     if(i>=0){state.items[i].analysisStatus="no-details";persist();render();}
+   const found=[m.price!=null&&"price",m.km!=null&&"km",m.year!=null&&"year",m.make&&"vehicle",m.description_summary&&"description"].filter(Boolean);
+   if(found.length){
+     note.textContent="✓ AI review complete"+(typeof c==="number"?" • "+Math.round(c*100)+"% confidence":"")+" • found "+found.join(", ")+". Verify the populated details, then tap Add to WheelBeast.";
+   }else{
+     note.textContent="⚠ AI opened the post but could not extract vehicle details. Verify the link or enter the missing details manually before adding.";
    }
-   const found=[data.metadata?.price!=null&&"price",data.metadata?.km!=null&&"km",data.metadata?.year!=null&&"year",data.metadata?.make&&"vehicle"].filter(Boolean);
-   note.textContent="✓ Marketplace read complete"+(typeof c==="number"?" • "+Math.round(c*100)+"% confidence":"")+(found.length?" • found "+found.join(", "):" • no vehicle details detected")+". Review, then Score & Save.";
+   save.disabled=false;
+   save.textContent="Add to WheelBeast";
    return true;
  }catch(e){
-   if(e.name==="AbortError") note.textContent="Automatic read timed out after 40 seconds. The Facebook browser session may be waiting on a login/challenge.";
-   else note.textContent="Automatic read failed: "+e.message;
-   const i=state.items.findIndex(x=>x.url===url);
-   if(i>=0){state.items[i].analysisStatus="failed";state.items[i].analysisError=e.message||"Analysis failed";persist();render();}
+   if(e.name==="AbortError") note.textContent="⚠ AI review timed out after 40 seconds. You can retry the share or enter the details manually.";
+   else note.textContent="⚠ AI review failed: "+e.message;
+   save.disabled=false;
+   save.textContent="Add to WheelBeast";
    return false;
  }finally{
    clearTimeout(timer);
@@ -152,12 +149,14 @@ function removeListing(id){
 }
 function openAdd(u="",t="",autoAnalyze=false){
  state.editingId=null;
- $("#modalTitle").textContent="Add a listing";
+ $("#modalTitle").textContent=autoAnalyze?"Review Facebook listing":"Add a listing";
+ $("#saveBtn").disabled=false;
+ $("#saveBtn").textContent="Add to WheelBeast";
  $("#url").value=u;$("#vehicle").value="";$("#priceInput").value="";$("#kmInput").value="";$("#yearInput").value="";$("#safetyInput").checked=false;$("#text").value=t;
  $("#missingNote").classList.toggle("hidden",!!t);
  $("#missingNote").textContent=t?"":"Shared links often contain only the URL. Add the vehicle, price and km for an accurate score.";
  $("#modal").classList.remove("hidden");
- if(autoAnalyze&&u){ensurePendingListing(u);analyzeUrl(u);}
+ if(autoAnalyze&&u){analyzeUrl(u);}
  else setTimeout(()=>$("#vehicle").focus(),100);
 }
 function editListing(id){
@@ -169,7 +168,12 @@ function editListing(id){
 }
 $("#addBtn").onclick=()=>openAdd();
 $("#closeBtn").onclick=()=>{$("#modal").classList.add("hidden");state.editingId=null};
-$("#saveBtn").onclick=()=>{const u=$("#url").value.trim(),t=buildText();if(!u&&!t)return;saveListing(u,t||u);$("#modal").classList.add("hidden")};
+$("#saveBtn").onclick=()=>{
+ const u=$("#url").value.trim(),t=buildText();
+ if(!u&&!t)return;
+ saveListing(u,t||u);
+ $("#modal").classList.add("hidden");
+};
 $("#pasteBtn").onclick=async()=>{try{const t=await navigator.clipboard.readText();const url=(t.match(/https?:\/\/\S+/)||[])[0]||"";openAdd(url,t,!!url)}catch{openAdd()}};
 $("#helpBtn").onclick=()=>$("#help").classList.remove("hidden");
 $("#helpClose").onclick=$("#helpDone").onclick=()=>$("#help").classList.add("hidden");
