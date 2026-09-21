@@ -39,18 +39,34 @@ function applyMetadata(m={}){
 async function analyzeUrl(url){
  if(!ANALYZER_URL||!url||source(url)!=="Facebook Marketplace") return false;
  const note=$("#missingNote");
- note.classList.remove("hidden"); note.textContent="🤖 WheelBeast is reading this Marketplace listing…";
+ note.classList.remove("hidden");
+ note.textContent="🤖 WheelBeast is opening the Marketplace listing…";
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),40000);
  try{
-   const r=await fetch(ANALYZER_URL+"/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url})});
+   const r=await fetch(ANALYZER_URL+"/analyze",{
+     method:"POST",
+     headers:{"content-type":"application/json"},
+     body:JSON.stringify({url}),
+     signal:controller.signal
+   });
    const data=await r.json().catch(()=>({}));
-   if(!r.ok) throw new Error(data.code==="FB_LOGIN_REQUIRED"?"WheelBeast Facebook session needs refreshing.":data.error||"Analyzer unavailable.");
+   if(!r.ok){
+     const code=data.code||("HTTP_"+r.status);
+     const stage=data.stage?(" • "+data.stage):"";
+     throw new Error((data.error||"Analyzer unavailable.")+" ["+code+stage+"]");
+   }
    applyMetadata(data.metadata||{});
    const c=data.metadata?.confidence;
-   note.textContent="✓ Listing read automatically"+(typeof c==="number"?" • "+Math.round(c*100)+"% confidence":"")+". Review the fields, then Score & Save.";
+   const found=[data.metadata?.price!=null&&"price",data.metadata?.km!=null&&"km",data.metadata?.year!=null&&"year",data.metadata?.make&&"vehicle"].filter(Boolean);
+   note.textContent="✓ Marketplace read complete"+(typeof c==="number"?" • "+Math.round(c*100)+"% confidence":"")+(found.length?" • found "+found.join(", "):" • no vehicle details detected")+". Review, then Score & Save.";
    return true;
  }catch(e){
-   note.textContent="Automatic read unavailable: "+e.message+" You can still enter the details manually.";
+   if(e.name==="AbortError") note.textContent="Automatic read timed out after 40 seconds. The Facebook browser session may be waiting on a login/challenge.";
+   else note.textContent="Automatic read failed: "+e.message;
    return false;
+ }finally{
+   clearTimeout(timer);
  }
 }
 function render(){
@@ -103,5 +119,6 @@ $("#helpClose").onclick=$("#helpDone").onclick=()=>$("#help").classList.add("hid
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.view=b.dataset.view;render()});
 const q=new URLSearchParams(location.search);
 if(q.get("share")){const shared=q.get("share");const url=(shared.match(/https?:\/\/\S+/)||[])[0]||shared;openAdd(url,shared===url?"":shared,true);history.replaceState({},"",location.pathname)}
+window.wheelBeastStatus=async()=>{if(!ANALYZER_URL)return{ok:false,error:"Analyzer URL not configured"};const r=await fetch(ANALYZER_URL+"/status");return r.json()};
 if("serviceWorker"in navigator)navigator.serviceWorker.register("./sw.js");
 render();
