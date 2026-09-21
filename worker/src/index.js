@@ -91,6 +91,22 @@ export default {
     const id = env.FB_SESSION.idFromName("wheelbeast-facebook");
     const stub = env.FB_SESSION.get(id);
 
+    if (u.pathname === "/status") {
+      let session = { hasSession: false };
+      try {
+        const r = await stub.fetch(new Request("https://session.local/status"));
+        session = await r.json();
+      } catch {}
+      return json({
+        ok: true,
+        browserConfigured: !!env.BROWSER,
+        aiConfigured: !!env.AI,
+        facebookCredentialsConfigured: !!env.FB_EMAIL && !!env.FB_PASSWORD,
+        facebookSessionReady: !!session.hasSession,
+        service: "wheelbeast-marketplace-analyzer"
+      });
+    }
+
     if (u.pathname === "/admin/session" && request.method === "POST") {
       const auth = request.headers.get("authorization") || "";
       if (!env.ADMIN_TOKEN || auth !== `Bearer ${env.ADMIN_TOKEN}`) {
@@ -112,16 +128,26 @@ export default {
       const target = marketplaceUrl(body.url);
       if (!target) return json({ error: "A valid Facebook HTTPS URL is required." }, 400);
 
-      const rendered = await stub.fetch(new Request("https://session.local/render", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url: target })
-      }));
+      let rendered;
+      try {
+        rendered = await stub.fetch(new Request("https://session.local/render", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ url: target })
+        }));
+      } catch (error) {
+        return json({ error: String(error?.message || error), code: "SESSION_WORKER_ERROR", stage: "browser-session" }, 502);
+      }
 
-      const page = await rendered.json();
-      if (!rendered.ok) return json(page, rendered.status);
+      const page = await rendered.json().catch(() => ({}));
+      if (!rendered.ok) return json({ ...page, stage: page.stage || "facebook-render" }, rendered.status);
 
-      const metadata = await extractVehicle(env.AI, page.text || "", page.title || "", target);
+      let metadata;
+      try {
+        metadata = await extractVehicle(env.AI, page.text || "", page.title || "", target);
+      } catch (error) {
+        return json({ error: String(error?.message || error), code: "AI_EXTRACTION_ERROR", stage: "ai-extraction" }, 502);
+      }
       return json({
         ok: true,
         url: page.finalUrl || target,
@@ -137,7 +163,7 @@ export default {
 export class FacebookSession extends DurableObject {
   async login(page) {
     if (!this.env.FB_EMAIL || !this.env.FB_PASSWORD) {
-      return { ok: false, code: "FB_CREDENTIALS_MISSING", error: "Facebook secrets are not configured." };
+      return { ok: false, code: "FB_CREDENTIALS_MISSING", error: "Facebook secrets are not configured.", stage: "facebook-login" };
     }
 
     await page.goto("https://www.facebook.com/login", { waitUntil: "domcontentloaded", timeout: 25000 });
@@ -164,15 +190,15 @@ export class FacebookSession extends DurableObject {
       /log in|forgot password|create new account/.test(lower.slice(0, 2500));
 
     if (challenged) {
-      return { ok: false, code: "FB_LOGIN_CHALLENGE", error: "Facebook requires a one-time verification for the WheelBeast account." };
+      return { ok: false, code: "FB_LOGIN_CHALLENGE", error: "Facebook requires a one-time verification for the WheelBeast account.", stage: "facebook-login" };
     }
     if (stillLogin) {
-      return { ok: false, code: "FB_LOGIN_FAILED", error: "Facebook rejected the WheelBeast login." };
+      return { ok: false, code: "FB_LOGIN_FAILED", error: "Facebook rejected the WheelBeast login.", stage: "facebook-login" };
     }
 
     const cookies = await page.cookies();
     if (!cookies?.length) {
-      return { ok: false, code: "FB_LOGIN_FAILED", error: "Facebook login did not create a session." };
+      return { ok: false, code: "FB_LOGIN_FAILED", error: "Facebook login did not create a session.", stage: "facebook-login" };
     }
 
     await this.ctx.storage.put("facebookCookies", cookies);
@@ -181,6 +207,11 @@ export class FacebookSession extends DurableObject {
 
   async fetch(request) {
     const u = new URL(request.url);
+
+    if (u.pathname === "/status") {
+      const cookies = (await this.ctx.storage.get("facebookCookies")) || [];
+      return json({ ok: true, hasSession: cookies.length > 0, cookieCount: cookies.length });
+    }
 
     if (u.pathname === "/set" && request.method === "POST") {
       const body = await request.json();
@@ -245,7 +276,7 @@ export class FacebookSession extends DurableObject {
 
       return json({ ok: true, finalUrl, title, text: text.slice(0, 25000), loginRequired: false });
     } catch (error) {
-      return json({ error: String(error?.message || error), code: "BROWSER_ERROR" }, 502);
+      return json({ error: String(error?.message || error), code: "BROWSER_ERROR", stage: "browser-render" }, 502);
     } finally {
       if (browser) await browser.close().catch(() => {});
     }
