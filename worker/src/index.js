@@ -1,3 +1,4 @@
+// WheelBeast deployment trigger: Cloudflare Worker backend
 import { DurableObject } from "cloudflare:workers";
 import * as puppeteer from "@cloudflare/puppeteer";
 
