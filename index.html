@@ -1,0 +1,19 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0c1118"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Car Steals">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg" type="image/svg+xml">
+<title>Car Steal Finder</title><link rel="stylesheet" href="app.css"></head><body>
+<header><div><h1>Car Steal Finder</h1><p>Find the cheap cars actually worth chasing.</p></div><button id="addBtn" class="primary">+ Add</button></header>
+<section class="hero"><div class="metric"><b id="steals">0</b><span>Steals</span></div><div class="metric"><b id="matches">0</b><span>Matches</span></div><div class="metric"><b id="saved">0</b><span>Saved</span></div></section>
+<section class="filters">
+<select id="maxPrice"><option value="2000">≤ $2k</option><option value="3000">≤ $3k</option><option value="4000">≤ $4k</option><option value="5000" selected>≤ $5k</option><option value="7500">≤ $7.5k</option><option value="999999">Any price</option></select>
+<select id="maxKm"><option value="160000">≤160k km</option><option value="200000">≤200k km</option><option value="250000" selected>≤250k km</option><option value="300000">≤300k km</option><option value="999999">Any km</option></select>
+<label><input type="checkbox" id="safetyOnly"> Safety only</label>
+<select id="sort"><option value="score">Best deals</option><option value="newest">Newest</option><option value="price">Lowest price</option><option value="km">Lowest km</option></select>
+</section>
+<div class="toolbar"><button id="pasteBtn">Paste from Clipboard</button><button id="helpBtn">iPhone Share Shortcut</button></div>
+<main id="feed"></main>
+<div id="modal" class="modal hidden"><div class="sheet"><div class="sheetHead"><h2>Add a listing</h2><button id="closeBtn">×</button></div><p class="hint">Paste the listing link and visible title/description. More text gives a better score.</p><label>Listing URL<input id="url" type="url" placeholder="https://..."></label><label>Listing text<textarea id="text" rows="8" placeholder="2010 Toyota Corolla $3,200 148,000 km. Safetied..."></textarea></label><button id="saveBtn" class="primary full">Score & Save</button></div></div>
+<div id="help" class="modal hidden"><div class="sheet"><div class="sheetHead"><h2>Free iPhone Share Sheet</h2><button id="helpClose">×</button></div><div class="steps"><p><b>1.</b> Create an Apple Shortcut named <b>Car Steal Finder</b>.</p><p><b>2.</b> Enable <b>Show in Share Sheet</b> for URLs.</p><p><b>3.</b> Add <b>Open URLs</b>.</p><p><b>4.</b> Use <code>https://jakec0des.github.io/car-steal-finder/?share=[Shortcut Input]</code>.</p><p><b>5.</b> On Marketplace/Kijiji: Share → Car Steal Finder.</p></div><button id="helpDone" class="primary full">Got it</button></div></div>
+<nav><button data-view="all" class="active">All</button><button data-view="steals">🔥 Steals</button><button data-view="priority">Toyota/Honda/Vibe</button></nav>
+<script src="scoring.js"></script><script src="app.js"></script></body></html>
