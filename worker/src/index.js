@@ -102,6 +102,7 @@ export default {
         browserConfigured: !!env.BROWSER,
         aiConfigured: !!env.AI,
         facebookCredentialsConfigured: !!env.FB_EMAIL && !!env.FB_PASSWORD,
+        facebookCookieBootstrapConfigured: !!env.FB_COOKIES_JSON,
         facebookSessionReady: !!session.hasSession,
         service: "wheelbeast-marketplace-analyzer"
       });
@@ -161,6 +162,18 @@ export default {
 };
 
 export class FacebookSession extends DurableObject {
+  async seedCookiesFromSecret() {
+    if (!this.env.FB_COOKIES_JSON) return [];
+    try {
+      const parsed = JSON.parse(this.env.FB_COOKIES_JSON);
+      if (!Array.isArray(parsed) || !parsed.length) return [];
+      await this.ctx.storage.put("facebookCookies", parsed);
+      return parsed;
+    } catch {
+      return [];
+    }
+  }
+
   async login(page) {
     if (!this.env.FB_EMAIL || !this.env.FB_PASSWORD) {
       return { ok: false, code: "FB_CREDENTIALS_MISSING", error: "Facebook secrets are not configured.", stage: "facebook-login" };
@@ -232,9 +245,15 @@ export class FacebookSession extends DurableObject {
       await page.setViewport({ width: 1280, height: 900 });
 
       let cookies = (await this.ctx.storage.get("facebookCookies")) || [];
+      if (!cookies.length) cookies = await this.seedCookiesFromSecret();
       if (!cookies.length) {
         const login = await this.login(page);
-        if (!login.ok) return json(login, login.code === "FB_LOGIN_CHALLENGE" ? 409 : 401);
+        if (!login.ok) {
+          return json({
+            ...login,
+            fallback: "Export cookies from a normal logged-in browser and store them in the Cloudflare secret FB_COOKIES_JSON."
+          }, login.code === "FB_LOGIN_CHALLENGE" ? 409 : 401);
+        }
         cookies = (await this.ctx.storage.get("facebookCookies")) || [];
       }
 
