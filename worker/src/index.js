@@ -135,6 +135,50 @@ export default {
 };
 
 export class FacebookSession extends DurableObject {
+  async login(page) {
+    if (!this.env.FB_EMAIL || !this.env.FB_PASSWORD) {
+      return { ok: false, code: "FB_CREDENTIALS_MISSING", error: "Facebook secrets are not configured." };
+    }
+
+    await page.goto("https://www.facebook.com/login", { waitUntil: "domcontentloaded", timeout: 25000 });
+    await page.waitForSelector('input[name="email"]', { timeout: 10000 });
+    await page.type('input[name="email"]', this.env.FB_EMAIL, { delay: 20 });
+    await page.type('input[name="pass"]', this.env.FB_PASSWORD, { delay: 20 });
+
+    await Promise.allSettled([
+      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }),
+      page.click('button[name="login"]')
+    ]);
+    await new Promise(r => setTimeout(r, 2500));
+
+    const finalUrl = page.url();
+    const bodyText = await page.evaluate(() => document.body?.innerText || "");
+    const lower = bodyText.toLowerCase();
+
+    const challenged =
+      /two-factor|two factor|authentication code|security check|confirm your identity|check your notifications|enter code/.test(lower) ||
+      /checkpoint|two_step_verification/.test(finalUrl);
+
+    const stillLogin =
+      /\/login/.test(new URL(finalUrl).pathname) &&
+      /log in|forgot password|create new account/.test(lower.slice(0, 2500));
+
+    if (challenged) {
+      return { ok: false, code: "FB_LOGIN_CHALLENGE", error: "Facebook requires a one-time verification for the WheelBeast account." };
+    }
+    if (stillLogin) {
+      return { ok: false, code: "FB_LOGIN_FAILED", error: "Facebook rejected the WheelBeast login." };
+    }
+
+    const cookies = await page.cookies();
+    if (!cookies?.length) {
+      return { ok: false, code: "FB_LOGIN_FAILED", error: "Facebook login did not create a session." };
+    }
+
+    await this.ctx.storage.put("facebookCookies", cookies);
+    return { ok: true, stored: cookies.length };
+  }
+
   async fetch(request) {
     const u = new URL(request.url);
 
@@ -149,33 +193,54 @@ export class FacebookSession extends DurableObject {
     }
 
     const { url } = await request.json();
-    const cookies = (await this.ctx.storage.get("facebookCookies")) || [];
-    if (!cookies.length) {
-      return json({ error: "WheelBeast Facebook session has not been initialized.", code: "NO_FB_SESSION" }, 503);
-    }
 
     let browser;
     try {
       browser = await puppeteer.launch(this.env.BROWSER);
       const page = await browser.newPage();
       await page.setViewport({ width: 1280, height: 900 });
-      await page.setCookie(...cookies);
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
-      await new Promise(r => setTimeout(r, 1800));
 
-      const finalUrl = page.url();
-      const title = await page.title();
-      const text = await page.evaluate(() => document.body?.innerText || "");
-      const lower = text.toLowerCase();
-      const loginRequired =
+      let cookies = (await this.ctx.storage.get("facebookCookies")) || [];
+      if (!cookies.length) {
+        const login = await this.login(page);
+        if (!login.ok) return json(login, login.code === "FB_LOGIN_CHALLENGE" ? 409 : 401);
+        cookies = (await this.ctx.storage.get("facebookCookies")) || [];
+      }
+
+      if (cookies.length) await page.setCookie(...cookies);
+
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
+      await new Promise(r => setTimeout(r, 2000));
+
+      let finalUrl = page.url();
+      let title = await page.title();
+      let text = await page.evaluate(() => document.body?.innerText || "");
+      let lower = text.toLowerCase();
+
+      let loginRequired =
         /log in|login to facebook|create new account/.test(lower.slice(0, 2500)) &&
         !/marketplace/.test(lower.slice(0, 1200));
+
+      if (loginRequired) {
+        const login = await this.login(page);
+        if (!login.ok) return json(login, login.code === "FB_LOGIN_CHALLENGE" ? 409 : 401);
+
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
+        await new Promise(r => setTimeout(r, 2000));
+        finalUrl = page.url();
+        title = await page.title();
+        text = await page.evaluate(() => document.body?.innerText || "");
+        lower = text.toLowerCase();
+        loginRequired =
+          /log in|login to facebook|create new account/.test(lower.slice(0, 2500)) &&
+          !/marketplace/.test(lower.slice(0, 1200));
+      }
 
       const freshCookies = await page.cookies();
       if (freshCookies?.length) await this.ctx.storage.put("facebookCookies", freshCookies);
 
       if (loginRequired) {
-        return json({ error: "WheelBeast Facebook session needs to be refreshed.", code: "FB_LOGIN_REQUIRED", loginRequired: true }, 401);
+        return json({ error: "WheelBeast Facebook session needs verification.", code: "FB_LOGIN_REQUIRED", loginRequired: true }, 401);
       }
 
       return json({ ok: true, finalUrl, title, text: text.slice(0, 25000), loginRequired: false });
