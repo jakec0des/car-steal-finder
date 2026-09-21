@@ -102,7 +102,7 @@ export default {
         browserConfigured: !!env.BROWSER,
         aiConfigured: !!env.AI,
         facebookCredentialsConfigured: !!env.FB_EMAIL && !!env.FB_PASSWORD,
-        facebookCookieBootstrapConfigured: !!env.FB_COOKIES_JSON,
+        facebookCookieBootstrapConfigured: !!env.FB_COOKIES_JSON || !!env.FB_COOKIE_HEADER,
         facebookSessionReady: !!session.hasSession,
         service: "wheelbeast-marketplace-analyzer"
       });
@@ -163,15 +163,42 @@ export default {
 
 export class FacebookSession extends DurableObject {
   async seedCookiesFromSecret() {
-    if (!this.env.FB_COOKIES_JSON) return [];
-    try {
-      const parsed = JSON.parse(this.env.FB_COOKIES_JSON);
-      if (!Array.isArray(parsed) || !parsed.length) return [];
-      await this.ctx.storage.put("facebookCookies", parsed);
-      return parsed;
-    } catch {
-      return [];
+    if (this.env.FB_COOKIES_JSON) {
+      try {
+        const parsed = JSON.parse(this.env.FB_COOKIES_JSON);
+        if (Array.isArray(parsed) && parsed.length) {
+          await this.ctx.storage.put("facebookCookies", parsed);
+          return parsed;
+        }
+      } catch {}
     }
+
+    if (this.env.FB_COOKIE_HEADER) {
+      const parsed = String(this.env.FB_COOKIE_HEADER)
+        .split(";")
+        .map(part => part.trim())
+        .filter(Boolean)
+        .map(part => {
+          const i = part.indexOf("=");
+          if (i <= 0) return null;
+          return {
+            name: part.slice(0, i).trim(),
+            value: part.slice(i + 1),
+            domain: ".facebook.com",
+            path: "/",
+            secure: true,
+            sameSite: "Lax"
+          };
+        })
+        .filter(Boolean);
+
+      if (parsed.length) {
+        await this.ctx.storage.put("facebookCookies", parsed);
+        return parsed;
+      }
+    }
+
+    return [];
   }
 
   async login(page) {
@@ -251,7 +278,7 @@ export class FacebookSession extends DurableObject {
         if (!login.ok) {
           return json({
             ...login,
-            fallback: "Export cookies from a normal logged-in browser and store them in the Cloudflare secret FB_COOKIES_JSON."
+            fallback: "Copy the normal browser's Facebook Cookie request header into the Cloudflare secret FB_COOKIE_HEADER, or provide FB_COOKIES_JSON."
           }, login.code === "FB_LOGIN_CHALLENGE" ? 409 : 401);
         }
         cookies = (await this.ctx.storage.get("facebookCookies")) || [];
