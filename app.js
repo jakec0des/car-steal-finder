@@ -252,7 +252,14 @@ document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.query
 function handleShareHandoff(){
  const q=new URLSearchParams(location.search);
  const hashMatch=location.hash.match(/^#share64=(.+)$/);
- const share64=q.get("share64")||(hashMatch&&hashMatch[1])||"";
+
+ // Read share64 from the raw query string first. This preserves "+" characters
+ // and lets us recover %0A/%0D line breaks that Apple Shortcuts may insert.
+ const rawMatch=location.search.match(/[?&]share64=([^&]*)/);
+ let share64=(rawMatch&&rawMatch[1])||(hashMatch&&hashMatch[1])||"";
+ if(share64){
+   try{share64=decodeURIComponent(share64)}catch{}
+ }
  if(!q.has("share")&&!share64) return false;
 
  const shared=share64?decodeShare64(share64):decodeShared(q.get("share")||"");
@@ -266,7 +273,9 @@ function handleShareHandoff(){
  } else {
    openAdd("","",false);
    $("#missingNote").classList.remove("hidden");
-   $("#missingNote").textContent="⚠ No Marketplace URL reached WheelBeast from the Shortcut. The Shortcut opened the app, but passed an empty/unsupported value.";
+   $("#missingNote").textContent=share64
+     ?"⚠ WheelBeast received the Shortcut payload but could not decode a Facebook Marketplace URL."
+     :"⚠ No Marketplace URL reached WheelBeast from the Shortcut.";
  }
  return true;
 }
