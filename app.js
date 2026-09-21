@@ -10,18 +10,33 @@ function decodeShared(v=""){
  return s;
 }
 function decodeShare64(v=""){
- try{
-   // URLSearchParams converts "+" to a space. Apple Shortcuts standard Base64
-   // legitimately contains "+", so restore it before decoding. Also remove
-   // any line breaks Shortcuts may insert into long Base64 output.
-   const normalized=String(v||"")
-     .replace(/ /g,"+")
-     .replace(/[\r\n\t]/g,"")
-     .replace(/-/g,"+")
-     .replace(/_/g,"/");
-   const padded=normalized+"=".repeat((4-normalized.length%4)%4);
-   return decodeURIComponent(Array.from(atob(padded),c=>"%"+c.charCodeAt(0).toString(16).padStart(2,"0")).join(""));
- }catch{return""}
+ const raw=String(v||"");
+ const attempts=[
+   raw,
+   (()=>{try{return decodeURIComponent(raw)}catch{return raw}})()
+ ];
+ for(const attempt of attempts){
+   try{
+     // Apple Shortcuts may insert spaces, line wraps, URL escaping, or URL-safe
+     // Base64 characters. Normalize all of those before decoding.
+     let normalized=attempt
+       .replace(/\s+/g,"")
+       .replace(/-/g,"+")
+       .replace(/_/g,"/");
+     // If a query parser converted "+" to spaces, restore them from the original
+     // raw payload before whitespace stripping where possible.
+     if(/ /.test(attempt)) normalized=attempt.replace(/ /g,"+").replace(/[\r\n\t]/g,"").replace(/-/g,"+").replace(/_/g,"/");
+     normalized=normalized.replace(/[^A-Za-z0-9+/=]/g,"");
+     const padded=normalized+"=".repeat((4-normalized.length%4)%4);
+     const binary=atob(padded);
+     try{
+       return new TextDecoder().decode(Uint8Array.from(binary,ch=>ch.charCodeAt(0))).trim();
+     }catch{
+       return binary.trim();
+     }
+   }catch{}
+ }
+ return"";
 }
 function extractSharedUrl(v=""){
  const s=decodeShared(v);
@@ -278,8 +293,14 @@ function handleShareHandoff(){
  }
  if(!q.has("share")&&!share64) return false;
 
- const shared=share64?decodeShare64(share64):decodeShared(q.get("share")||"");
- const url=extractSharedUrl(shared);
+ let shared=share64?decodeShare64(share64):decodeShared(q.get("share")||"");
+ let url=extractSharedUrl(shared);
+ // Defensive fallback: some iOS URL conversions can partially transform the
+ // Base64 payload. Try decoding a sanitized copy once more before giving up.
+ if(share64&&!/^https?:\/\//i.test(url||"")){
+   const retry=decodeShare64(share64.replace(/%0A|%0D/gi,"").replace(/\s+/g,""));
+   if(retry){shared=retry;url=extractSharedUrl(retry);}
+ }
 
  // Strip the handoff payload immediately. The Facebook URL is data only and is never opened locally.
  history.replaceState({},"",location.pathname);
