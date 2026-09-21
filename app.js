@@ -11,7 +11,14 @@ function decodeShared(v=""){
 }
 function decodeShare64(v=""){
  try{
-   const normalized=String(v||"").replace(/-/g,"+").replace(/_/g,"/");
+   // URLSearchParams converts "+" to a space. Apple Shortcuts standard Base64
+   // legitimately contains "+", so restore it before decoding. Also remove
+   // any line breaks Shortcuts may insert into long Base64 output.
+   const normalized=String(v||"")
+     .replace(/ /g,"+")
+     .replace(/[\r\n\t]/g,"")
+     .replace(/-/g,"+")
+     .replace(/_/g,"/");
    const padded=normalized+"=".repeat((4-normalized.length%4)%4);
    return decodeURIComponent(Array.from(atob(padded),c=>"%"+c.charCodeAt(0).toString(16).padStart(2,"0")).join(""));
  }catch{return""}
