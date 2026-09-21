@@ -58,6 +58,12 @@ async function analyzeUrl(url){
    }
    applyMetadata(data.metadata||{});
    const c=data.metadata?.confidence;
+   const m=data.metadata||{};
+   const hasUseful=!!(m.price!=null||m.km!=null||m.year!=null||m.make||m.model||m.description_summary);
+   if(hasUseful){
+     const built=buildText();
+     if(built||url) saveListing(url,built||url);
+   }
    const found=[data.metadata?.price!=null&&"price",data.metadata?.km!=null&&"km",data.metadata?.year!=null&&"year",data.metadata?.make&&"vehicle"].filter(Boolean);
    note.textContent="✓ Marketplace read complete"+(typeof c==="number"?" • "+Math.round(c*100)+"% confidence":"")+(found.length?" • found "+found.join(", "):" • no vehicle details detected")+". Review, then Score & Save.";
    return true;
@@ -91,6 +97,16 @@ function render(){
    return '<div class="card"><div class="top"><div class="title">'+esc(x.title)+'</div><div class="badge '+esc((x.tier||"").toLowerCase())+'">'+esc(x.tier)+' '+x.score+'/100</div></div><div class="price">'+fmt(x.price)+'</div><div class="meta">'+(x.year||"Year ?")+' • '+(x.km?x.km.toLocaleString()+" km":"km ?")+' • '+(x.safetyConfirmed?"✓ safety":"safety ?")+'</div>'+(incomplete?'<div class="incomplete">⚠ Missing details — complete this car for an accurate score.</div>':'')+'<div class="reason">'+esc((x.reasons||[]).slice(0,5).join(" · "))+'</div><div class="url">'+esc(x.source||"")+(x.url?" • "+esc(x.url):"")+'</div><div class="cardActions"><button class="editBtn" data-edit="'+esc(x.id)+'">Edit details</button>'+openButton+'</div></div>';
  }).join("");
  document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editListing(b.dataset.edit));
+ document.querySelectorAll("[data-remove]").forEach(b=>b.onclick=()=>removeListing(b.dataset.remove));
+}
+function removeListing(id){
+ const x=state.items.find(i=>i.id===id);
+ if(!x) return;
+ const label=x.title||x.url||"this listing";
+ if(!confirm("Remove "+label+" from WheelBeast?")) return;
+ state.items=state.items.filter(i=>i.id!==id);
+ persist();
+ render();
 }
 function openAdd(u="",t="",autoAnalyze=false){
  state.editingId=null;
