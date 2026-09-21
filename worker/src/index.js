@@ -36,7 +36,7 @@ function safeJson(text) {
   try { return JSON.parse(match[0]); } catch { return null; }
 }
 
-async function extractVehicle(ai, pageText, pageTitle, url) {
+async function extractVehicle(ai, pageText, pageTitle, url, extra = {}) {
   const prompt = `You extract used-car listing facts. Return JSON only.
 Never invent a value. Use null when not clearly present.
 Schema:
@@ -59,7 +59,14 @@ Price must be CAD numeric dollars when visible. km must be numeric kilometres.
 confidence is 0 to 1 based only on how much listing data is present.
 
 URL: ${url}
+Final URL: ${extra.finalUrl || url}
 Page title: ${pageTitle}
+OpenGraph title: ${extra.ogTitle || ""}
+OpenGraph description: ${extra.ogDescription || ""}
+Canonical URL: ${extra.canonical || ""}
+Structured/script text:
+${(extra.structuredText || "").slice(0, 12000)}
+
 Visible page text:
 ${pageText.slice(0, 18000)}`;
 
@@ -145,7 +152,13 @@ export default {
 
       let metadata;
       try {
-        metadata = await extractVehicle(env.AI, page.text || "", page.title || "", target);
+        metadata = await extractVehicle(env.AI, page.text || "", page.title || "", target, {
+          finalUrl: page.finalUrl,
+          ogTitle: page.ogTitle,
+          ogDescription: page.ogDescription,
+          canonical: page.canonical,
+          structuredText: page.structuredText
+        });
       } catch (error) {
         return json({ error: String(error?.message || error), code: "AI_EXTRACTION_ERROR", stage: "ai-extraction" }, 502);
       }
@@ -153,7 +166,14 @@ export default {
         ok: true,
         url: page.finalUrl || target,
         loginRequired: !!page.loginRequired,
-        metadata
+        metadata,
+        diagnostics: {
+          finalUrl: page.finalUrl || target,
+          textLength: (page.text || "").length,
+          structuredLength: (page.structuredText || "").length,
+          ogTitle: page.ogTitle || null,
+          ogDescriptionPresent: !!page.ogDescription
+        }
       });
     }
 
@@ -289,9 +309,31 @@ export class FacebookSession extends DurableObject {
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
       await new Promise(r => setTimeout(r, 2000));
 
+      await new Promise(r => setTimeout(r, 2500));
       let finalUrl = page.url();
       let title = await page.title();
-      let text = await page.evaluate(() => document.body?.innerText || "");
+      let extracted = await page.evaluate(() => {
+        const text = document.body?.innerText || "";
+        const meta = sel => document.querySelector(sel)?.getAttribute("content") || "";
+        const canonical = document.querySelector('link[rel="canonical"]')?.href || "";
+        const structuredText = Array.from(document.scripts)
+          .map(s => s.textContent || "")
+          .filter(t => /marketplace|listing|vehicle|price|kilomet|mileage|description|seller/i.test(t))
+          .join("\n")
+          .slice(0, 50000);
+        return {
+          text,
+          ogTitle: meta('meta[property="og:title"]'),
+          ogDescription: meta('meta[property="og:description"]'),
+          canonical,
+          structuredText
+        };
+      });
+      let text = extracted.text || "";
+      let ogTitle = extracted.ogTitle || "";
+      let ogDescription = extracted.ogDescription || "";
+      let canonical = extracted.canonical || "";
+      let structuredText = extracted.structuredText || "";
       let lower = text.toLowerCase();
 
       let loginRequired =
@@ -304,9 +346,31 @@ export class FacebookSession extends DurableObject {
 
         await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
         await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 2500));
         finalUrl = page.url();
         title = await page.title();
-        text = await page.evaluate(() => document.body?.innerText || "");
+        extracted = await page.evaluate(() => {
+          const text = document.body?.innerText || "";
+          const meta = sel => document.querySelector(sel)?.getAttribute("content") || "";
+          const canonical = document.querySelector('link[rel="canonical"]')?.href || "";
+          const structuredText = Array.from(document.scripts)
+            .map(s => s.textContent || "")
+            .filter(t => /marketplace|listing|vehicle|price|kilomet|mileage|description|seller/i.test(t))
+            .join("\n")
+            .slice(0, 50000);
+          return {
+            text,
+            ogTitle: meta('meta[property="og:title"]'),
+            ogDescription: meta('meta[property="og:description"]'),
+            canonical,
+            structuredText
+          };
+        });
+        text = extracted.text || "";
+        ogTitle = extracted.ogTitle || "";
+        ogDescription = extracted.ogDescription || "";
+        canonical = extracted.canonical || "";
+        structuredText = extracted.structuredText || "";
         lower = text.toLowerCase();
         loginRequired =
           /log in|login to facebook|create new account/.test(lower.slice(0, 2500)) &&
@@ -320,7 +384,17 @@ export class FacebookSession extends DurableObject {
         return json({ error: "WheelBeast Facebook session needs verification.", code: "FB_LOGIN_REQUIRED", loginRequired: true }, 401);
       }
 
-      return json({ ok: true, finalUrl, title, text: text.slice(0, 25000), loginRequired: false });
+      return json({
+        ok: true,
+        finalUrl,
+        title,
+        text: text.slice(0, 25000),
+        ogTitle,
+        ogDescription,
+        canonical,
+        structuredText: structuredText.slice(0, 30000),
+        loginRequired: false
+      });
     } catch (error) {
       return json({ error: String(error?.message || error), code: "BROWSER_ERROR", stage: "browser-render" }, 502);
     } finally {
