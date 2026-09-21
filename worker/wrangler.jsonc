@@ -1,0 +1,16 @@
+{
+  "name": "wheelbeast-marketplace-analyzer",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-21",
+  "compatibility_flags": ["nodejs_compat"],
+  "browser": { "binding": "BROWSER" },
+  "ai": { "binding": "AI" },
+  "durable_objects": {
+    "bindings": [
+      { "name": "FB_SESSION", "class_name": "FacebookSession" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["FacebookSession"] }
+  ]
+}
