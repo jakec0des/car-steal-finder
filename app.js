@@ -136,5 +136,25 @@ document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.query
 const q=new URLSearchParams(location.search);
 if(q.get("share")){const shared=q.get("share");const url=(shared.match(/https?:\/\/\S+/)||[])[0]||shared;openAdd(url,shared===url?"":shared,true);history.replaceState({},"",location.pathname)}
 window.wheelBeastStatus=async()=>{if(!ANALYZER_URL)return{ok:false,error:"Analyzer URL not configured"};const r=await fetch(ANALYZER_URL+"/status");return r.json()};
-if("serviceWorker"in navigator)navigator.serviceWorker.register("./sw.js");
+if("serviceWorker"in navigator){
+ let refreshing=false;
+ navigator.serviceWorker.addEventListener("controllerchange",()=>{
+   if(refreshing)return;
+   refreshing=true;
+   location.reload();
+ });
+ navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).then(reg=>{
+   reg.update().catch(()=>{});
+   if(reg.waiting)reg.waiting.postMessage({type:"SKIP_WAITING"});
+   reg.addEventListener("updatefound",()=>{
+     const next=reg.installing;
+     if(!next)return;
+     next.addEventListener("statechange",()=>{
+       if(next.state==="installed"&&navigator.serviceWorker.controller){
+         next.postMessage({type:"SKIP_WAITING"});
+       }
+     });
+   });
+ }).catch(()=>{});
+}
 render();
