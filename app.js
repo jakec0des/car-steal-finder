@@ -127,7 +127,7 @@ async function analyzeUrl(url){
    clearTimeout(timer);
  }
 }
-async function reviewSharedUrl(url){
+async async function reviewSharedUrl(url){
  if(!ANALYZER_URL||!url||source(url)!=="Facebook Marketplace"){
    openAdd(url,"",false);
    return;
