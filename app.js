@@ -242,9 +242,11 @@ $("#helpBtn").onclick=()=>$("#help").classList.remove("hidden");
 $("#helpClose").onclick=$("#helpDone").onclick=()=>$("#help").classList.add("hidden");
 ["maxPrice","maxKm","safetyOnly","sort"].forEach(id=>$("#"+id).addEventListener("change",render));
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.view=b.dataset.view;render()});
-const q=new URLSearchParams(location.search);
-const hashMatch=location.hash.match(/^#share64=(.+)$/);
-if(q.has("share")||hashMatch){
+function handleShareHandoff(){
+ const q=new URLSearchParams(location.search);
+ const hashMatch=location.hash.match(/^#share64=(.+)$/);
+ if(!q.has("share")&&!hashMatch) return false;
+
  const shared=hashMatch?decodeShare64(hashMatch[1]):decodeShared(q.get("share")||"");
  const url=extractSharedUrl(shared);
 
@@ -258,7 +260,14 @@ if(q.has("share")||hashMatch){
    $("#missingNote").classList.remove("hidden");
    $("#missingNote").textContent="⚠ No Marketplace URL reached WheelBeast from the Shortcut. The Shortcut opened the app, but passed an empty/unsupported value.";
  }
+ return true;
 }
+
+// Run on first load and also when iOS reuses the already-open WheelBeast tab.
+// A #share64 handoff often changes only the hash, which does not reload the page.
+handleShareHandoff();
+window.addEventListener("hashchange",()=>handleShareHandoff());
+window.addEventListener("pageshow",()=>handleShareHandoff());
 window.wheelBeastStatus=async()=>{if(!ANALYZER_URL)return{ok:false,error:"Analyzer URL not configured"};const r=await fetch(ANALYZER_URL+"/status");return r.json()};
 if("serviceWorker"in navigator){
  navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).then(reg=>{
