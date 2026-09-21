@@ -245,9 +245,10 @@ document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.query
 function handleShareHandoff(){
  const q=new URLSearchParams(location.search);
  const hashMatch=location.hash.match(/^#share64=(.+)$/);
- if(!q.has("share")&&!hashMatch) return false;
+ const share64=q.get("share64")||(hashMatch&&hashMatch[1])||"";
+ if(!q.has("share")&&!share64) return false;
 
- const shared=hashMatch?decodeShare64(hashMatch[1]):decodeShared(q.get("share")||"");
+ const shared=share64?decodeShare64(share64):decodeShared(q.get("share")||"");
  const url=extractSharedUrl(shared);
 
  // Strip the handoff payload immediately. The Facebook URL is data only and is never opened locally.
@@ -263,8 +264,8 @@ function handleShareHandoff(){
  return true;
 }
 
-// Run on first load and also when iOS reuses the already-open WheelBeast tab.
-// A #share64 handoff often changes only the hash, which does not reload the page.
+// Query-string share64 is preferred because iOS reliably performs a fresh navigation.
+// Hash share64 remains supported for older shortcuts.
 handleShareHandoff();
 window.addEventListener("hashchange",()=>handleShareHandoff());
 window.addEventListener("pageshow",()=>handleShareHandoff());
