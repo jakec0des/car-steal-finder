@@ -4,6 +4,37 @@ const ANALYZER_URL=(window.WHEELBEAST_ANALYZER_URL||"").replace(/\/$/,"");
 const fmt=n=>n==null?"Price ?":new Intl.NumberFormat("en-CA",{style:"currency",currency:"CAD",maximumFractionDigits:0}).format(n);
 const esc=s=>String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
 function source(url=""){try{const h=new URL(url).hostname;if(h.includes("facebook"))return"Facebook Marketplace";if(h.includes("kijiji"))return"Kijiji";if(h.includes("autotrader"))return"AutoTrader";return h}catch{return"Manual"}}
+function decodeShared(v=""){
+ let s=String(v||"");
+ for(let i=0;i<2;i++){try{const d=decodeURIComponent(s);if(d===s)break;s=d}catch{break}}
+ return s;
+}
+function extractSharedUrl(v=""){
+ const s=decodeShared(v);
+ const m=s.match(/https?:\/\/[^\s]+/i);
+ return m?m[0].replace(/[),.;]+$/,""):s.trim();
+}
+function ensurePendingListing(url){
+ if(!url)return;
+ const idx=state.items.findIndex(x=>x.url===url);
+ const pending={
+   id:url,
+   url,
+   source:source(url),
+   title:"Reviewing Marketplace listing…",
+   text:"",
+   capturedAt:new Date().toISOString(),
+   firstSeen:new Date().toISOString(),
+   lastSeen:new Date().toISOString(),
+   price:null,km:null,year:null,score:45,tier:"WATCH",
+   safetyConfirmed:false,reliability:"Unknown",
+   reasons:["Analyzing listing"],
+   analysisStatus:"pending"
+ };
+ if(idx>=0) state.items[idx]={...state.items[idx],analysisStatus:"pending",lastSeen:new Date().toISOString()};
+ else state.items.unshift(pending);
+ persist();render();
+}
 function persist(){localStorage.setItem("carStealItems",JSON.stringify(state.items))}
 function buildText(){
  const v=$("#vehicle").value.trim(),p=$("#priceInput").value.trim(),k=$("#kmInput").value.trim(),y=$("#yearInput").value.trim(),notes=$("#text").value.trim();
@@ -62,7 +93,14 @@ async function analyzeUrl(url){
    const hasUseful=!!(m.price!=null||m.km!=null||m.year!=null||m.make||m.model||m.description_summary);
    if(hasUseful){
      const built=buildText();
-     if(built||url) saveListing(url,built||url);
+     if(built||url){
+       saveListing(url,built||url);
+       const i=state.items.findIndex(x=>x.url===url);
+       if(i>=0){state.items[i].analysisStatus="complete";persist();render();}
+     }
+   } else {
+     const i=state.items.findIndex(x=>x.url===url);
+     if(i>=0){state.items[i].analysisStatus="no-details";persist();render();}
    }
    const found=[data.metadata?.price!=null&&"price",data.metadata?.km!=null&&"km",data.metadata?.year!=null&&"year",data.metadata?.make&&"vehicle"].filter(Boolean);
    note.textContent="✓ Marketplace read complete"+(typeof c==="number"?" • "+Math.round(c*100)+"% confidence":"")+(found.length?" • found "+found.join(", "):" • no vehicle details detected")+". Review, then Score & Save.";
@@ -70,6 +108,8 @@ async function analyzeUrl(url){
  }catch(e){
    if(e.name==="AbortError") note.textContent="Automatic read timed out after 40 seconds. The Facebook browser session may be waiting on a login/challenge.";
    else note.textContent="Automatic read failed: "+e.message;
+   const i=state.items.findIndex(x=>x.url===url);
+   if(i>=0){state.items[i].analysisStatus="failed";state.items[i].analysisError=e.message||"Analysis failed";persist();render();}
    return false;
  }finally{
    clearTimeout(timer);
@@ -91,10 +131,11 @@ function render(){
  if(!xs.length){$("#feed").innerHTML='<div class="empty"><b>No matching cars yet.</b><br><br>Shared cars with missing details will stay visible so you can complete them.</div>';return}
  $("#feed").innerHTML=xs.map(x=>{
    const incomplete=needsDetails(x);
+   const analysisBanner=x.analysisStatus==="pending"?'<div class="incomplete">🤖 Reviewing Marketplace listing…</div>':x.analysisStatus==="failed"?'<div class="incomplete">⚠ Review failed — open Edit details to retry manually.</div>':"";
    let openButton="";
    if(x.url&&x.source==="Facebook Marketplace")openButton='<a href="'+esc(facebookAppUrl(x.url))+'" class="openFb">Open in Facebook</a>';
    else if(x.url)openButton='<a href="'+esc(x.url)+'" target="_blank" rel="noopener">Open listing</a>';
-   return '<div class="card"><div class="top"><div class="title">'+esc(x.title)+'</div><div class="badge '+esc((x.tier||"").toLowerCase())+'">'+esc(x.tier)+' '+x.score+'/100</div></div><div class="price">'+fmt(x.price)+'</div><div class="meta">'+(x.year||"Year ?")+' • '+(x.km?x.km.toLocaleString()+" km":"km ?")+' • '+(x.safetyConfirmed?"✓ safety":"safety ?")+'</div>'+(incomplete?'<div class="incomplete">⚠ Missing details — complete this car for an accurate score.</div>':'')+'<div class="reason">'+esc((x.reasons||[]).slice(0,5).join(" · "))+'</div><div class="url">'+esc(x.source||"")+(x.url?" • "+esc(x.url):"")+'</div><div class="cardActions"><button class="editBtn" data-edit="'+esc(x.id)+'">Edit details</button>'+openButton+'<button class="removeBtn" data-remove="'+esc(x.id)+'">Remove</button></div></div>';
+   return '<div class="card"><div class="top"><div class="title">'+esc(x.title)+'</div><div class="badge '+esc((x.tier||"").toLowerCase())+'">'+esc(x.tier)+' '+x.score+'/100</div></div><div class="price">'+fmt(x.price)+'</div><div class="meta">'+(x.year||"Year ?")+' • '+(x.km?x.km.toLocaleString()+" km":"km ?")+' • '+(x.safetyConfirmed?"✓ safety":"safety ?")+'</div>'+analysisBanner+(incomplete&&x.analysisStatus!=="pending"?'<div class="incomplete">⚠ Missing details — complete this car for an accurate score.</div>':'')+'<div class="reason">'+esc((x.reasons||[]).slice(0,5).join(" · "))+'</div><div class="url">'+esc(x.source||"")+(x.url?" • "+esc(x.url):"")+'</div><div class="cardActions"><button class="editBtn" data-edit="'+esc(x.id)+'">Edit details</button>'+openButton+'<button class="removeBtn" data-remove="'+esc(x.id)+'">Remove</button></div></div>';
  }).join("");
  document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editListing(b.dataset.edit));
  document.querySelectorAll("[data-remove]").forEach(b=>b.onclick=()=>removeListing(b.dataset.remove));
@@ -115,7 +156,7 @@ function openAdd(u="",t="",autoAnalyze=false){
  $("#missingNote").classList.toggle("hidden",!!t);
  $("#missingNote").textContent=t?"":"Shared links often contain only the URL. Add the vehicle, price and km for an accurate score.";
  $("#modal").classList.remove("hidden");
- if(autoAnalyze&&u) analyzeUrl(u);
+ if(autoAnalyze&&u){ensurePendingListing(u);analyzeUrl(u);}
  else setTimeout(()=>$("#vehicle").focus(),100);
 }
 function editListing(id){
@@ -134,7 +175,12 @@ $("#helpClose").onclick=$("#helpDone").onclick=()=>$("#help").classList.add("hid
 ["maxPrice","maxKm","safetyOnly","sort"].forEach(id=>$("#"+id).addEventListener("change",render));
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.view=b.dataset.view;render()});
 const q=new URLSearchParams(location.search);
-if(q.get("share")){const shared=q.get("share");const url=(shared.match(/https?:\/\/\S+/)||[])[0]||shared;openAdd(url,shared===url?"":shared,true);history.replaceState({},"",location.pathname)}
+if(q.get("share")){
+ const shared=decodeShared(q.get("share"));
+ const url=extractSharedUrl(shared);
+ openAdd(url,shared===url?"":shared,true);
+ history.replaceState({},"",location.pathname);
+}
 window.wheelBeastStatus=async()=>{if(!ANALYZER_URL)return{ok:false,error:"Analyzer URL not configured"};const r=await fetch(ANALYZER_URL+"/status");return r.json()};
 if("serviceWorker"in navigator){
  let refreshing=false;
