@@ -133,12 +133,13 @@ function render(){
    const incomplete=needsDetails(x);
    const analysisBanner=x.analysisStatus==="pending"?'<div class="incomplete">🤖 Reviewing Marketplace listing…</div>':x.analysisStatus==="failed"?'<div class="incomplete">⚠ Review failed — open Edit details to retry manually.</div>':"";
    let openButton="";
-   if(x.url&&x.source==="Facebook Marketplace")openButton='<a href="'+esc(facebookAppUrl(x.url))+'" class="openFb">Open in Facebook</a>';
+   if(x.url&&x.source==="Facebook Marketplace")openButton='<a href="'+esc(facebookAppUrl(x.url))+'" class="openFb" rel="noopener noreferrer" data-user-open="facebook">Open in Facebook</a>';
    else if(x.url)openButton='<a href="'+esc(x.url)+'" target="_blank" rel="noopener">Open listing</a>';
    return '<div class="card"><div class="top"><div class="title">'+esc(x.title)+'</div><div class="badge '+esc((x.tier||"").toLowerCase())+'">'+esc(x.tier)+' '+x.score+'/100</div></div><div class="price">'+fmt(x.price)+'</div><div class="meta">'+(x.year||"Year ?")+' • '+(x.km?x.km.toLocaleString()+" km":"km ?")+' • '+(x.safetyConfirmed?"✓ safety":"safety ?")+'</div>'+analysisBanner+(incomplete&&x.analysisStatus!=="pending"?'<div class="incomplete">⚠ Missing details — complete this car for an accurate score.</div>':'')+'<div class="reason">'+esc((x.reasons||[]).slice(0,5).join(" · "))+'</div><div class="url">'+esc(x.source||"")+(x.url?" • "+esc(x.url):"")+'</div><div class="cardActions"><button class="editBtn" data-edit="'+esc(x.id)+'">Edit details</button>'+openButton+'<button class="removeBtn" data-remove="'+esc(x.id)+'">Remove</button></div></div>';
  }).join("");
- document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editListing(b.dataset.edit));
- document.querySelectorAll("[data-remove]").forEach(b=>b.onclick=()=>removeListing(b.dataset.remove));
+ document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();editListing(b.dataset.edit)});
+ document.querySelectorAll("[data-remove]").forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();removeListing(b.dataset.remove)});
+ document.querySelectorAll("[data-user-open='facebook']").forEach(a=>a.onclick=e=>e.stopPropagation());
 }
 function removeListing(id){
  const x=state.items.find(i=>i.id===id);
@@ -175,11 +176,17 @@ $("#helpClose").onclick=$("#helpDone").onclick=()=>$("#help").classList.add("hid
 ["maxPrice","maxKm","safetyOnly","sort"].forEach(id=>$("#"+id).addEventListener("change",render));
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.view=b.dataset.view;render()});
 const q=new URLSearchParams(location.search);
-if(q.get("share")){
- const shared=decodeShared(q.get("share"));
+if(q.has("share")){
+ const shared=decodeShared(q.get("share")||"");
  const url=extractSharedUrl(shared);
- openAdd(url,shared===url?"":shared,true);
+
+ // Remove the nested Facebook URL from the browser address immediately.
+ // Importing a shared listing is backend-only; the client never navigates to Facebook.
  history.replaceState({},"",location.pathname);
+
+ if(url){
+   openAdd(url,shared===url?"":shared,true);
+ }
 }
 window.wheelBeastStatus=async()=>{if(!ANALYZER_URL)return{ok:false,error:"Analyzer URL not configured"};const r=await fetch(ANALYZER_URL+"/status");return r.json()};
 if("serviceWorker"in navigator){
