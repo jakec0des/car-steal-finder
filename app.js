@@ -9,6 +9,13 @@ function decodeShared(v=""){
  for(let i=0;i<2;i++){try{const d=decodeURIComponent(s);if(d===s)break;s=d}catch{break}}
  return s;
 }
+function decodeShare64(v=""){
+ try{
+   const normalized=String(v||"").replace(/-/g,"+").replace(/_/g,"/");
+   const padded=normalized+"=".repeat((4-normalized.length%4)%4);
+   return decodeURIComponent(Array.from(atob(padded),c=>"%"+c.charCodeAt(0).toString(16).padStart(2,"0")).join(""));
+ }catch{return""}
+}
 function extractSharedUrl(v=""){
  const s=decodeShared(v);
  const m=s.match(/https?:\/\/[^\s]+/i);
@@ -180,13 +187,12 @@ $("#helpClose").onclick=$("#helpDone").onclick=()=>$("#help").classList.add("hid
 ["maxPrice","maxKm","safetyOnly","sort"].forEach(id=>$("#"+id).addEventListener("change",render));
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.view=b.dataset.view;render()});
 const q=new URLSearchParams(location.search);
-if(q.has("share")){
- const rawShare=q.get("share")||"";
- const shared=decodeShared(rawShare);
- let url=extractSharedUrl(shared);
+const hashMatch=location.hash.match(/^#share64=(.+)$/);
+if(q.has("share")||hashMatch){
+ const shared=hashMatch?decodeShare64(hashMatch[1]):decodeShared(q.get("share")||"");
+ const url=extractSharedUrl(shared);
 
- // Remove the nested Facebook URL from the browser address immediately.
- // Importing a shared listing is backend-only; the client never navigates to Facebook.
+ // Strip the handoff payload immediately. The Facebook URL is data only and is never opened locally.
  history.replaceState({},"",location.pathname);
 
  if(url){
