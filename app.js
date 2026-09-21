@@ -183,12 +183,6 @@ if(q.get("share")){
 }
 window.wheelBeastStatus=async()=>{if(!ANALYZER_URL)return{ok:false,error:"Analyzer URL not configured"};const r=await fetch(ANALYZER_URL+"/status");return r.json()};
 if("serviceWorker"in navigator){
- let refreshing=false;
- navigator.serviceWorker.addEventListener("controllerchange",()=>{
-   if(refreshing)return;
-   refreshing=true;
-   location.reload();
- });
  navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).then(reg=>{
    reg.update().catch(()=>{});
    if(reg.waiting)reg.waiting.postMessage({type:"SKIP_WAITING"});
