@@ -132,6 +132,16 @@ async async function reviewSharedUrl(url){
    openAdd(url,"",false);
    return;
  }
+
+ // Give immediate visible feedback at the top of the app so the user knows
+ // the Share Sheet handoff worked before the backend/browser analysis finishes.
+ openAdd(url,"",false);
+ $("#modalTitle").textContent="Reviewing Facebook listing";
+ $("#missingNote").classList.remove("hidden");
+ $("#missingNote").textContent="🤖 AI reviewing Facebook Marketplace post…";
+ $("#saveBtn").disabled=true;
+ $("#saveBtn").textContent="Reviewing…";
+
  ensurePendingListing(url);
  const controller=new AbortController();
  const timer=setTimeout(()=>controller.abort(),40000);
@@ -172,12 +182,18 @@ async async function reviewSharedUrl(url){
    $("#saveBtn").disabled=false;
    $("#saveBtn").textContent="Add to WheelBeast";
  }catch(e){
+   const msg=e.name==="AbortError"?"AI review timed out after 40 seconds.":(e.message||"AI review failed.");
    const idx=state.items.findIndex(x=>x.url===url);
    if(idx>=0){
      state.items[idx].analysisStatus="failed";
-     state.items[idx].analysisError=e.name==="AbortError"?"AI review timed out":(e.message||"AI review failed");
+     state.items[idx].analysisError=msg;
      persist();render();
    }
+   $("#modalTitle").textContent="Facebook review failed";
+   $("#missingNote").classList.remove("hidden");
+   $("#missingNote").textContent="⚠ "+msg;
+   $("#saveBtn").disabled=false;
+   $("#saveBtn").textContent="Add to WheelBeast";
  }finally{
    clearTimeout(timer);
  }
