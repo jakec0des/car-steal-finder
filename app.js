@@ -177,8 +177,9 @@ $("#helpClose").onclick=$("#helpDone").onclick=()=>$("#help").classList.add("hid
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.view=b.dataset.view;render()});
 const q=new URLSearchParams(location.search);
 if(q.has("share")){
- const shared=decodeShared(q.get("share")||"");
- const url=extractSharedUrl(shared);
+ const rawShare=q.get("share")||"";
+ const shared=decodeShared(rawShare);
+ let url=extractSharedUrl(shared);
 
  // Remove the nested Facebook URL from the browser address immediately.
  // Importing a shared listing is backend-only; the client never navigates to Facebook.
@@ -186,6 +187,10 @@ if(q.has("share")){
 
  if(url){
    openAdd(url,shared===url?"":shared,true);
+ } else {
+   openAdd("","",false);
+   $("#missingNote").classList.remove("hidden");
+   $("#missingNote").textContent="⚠ No Marketplace URL reached WheelBeast from the Shortcut. The Shortcut opened the app, but passed an empty/unsupported value.";
  }
 }
 window.wheelBeastStatus=async()=>{if(!ANALYZER_URL)return{ok:false,error:"Analyzer URL not configured"};const r=await fetch(ANALYZER_URL+"/status");return r.json()};
